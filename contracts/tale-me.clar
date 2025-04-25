@@ -51,6 +51,72 @@
   )
 )
 
+(define-public (add-segment (narrative-id uint) (text (string-utf8 1000)))
+  (let
+    (
+      (narrative (unwrap! (map-get? narratives { narrative-id: narrative-id }) (err error-not-found)))
+      (new-segment-id (+ (get latest-segment narrative) u1))
+    )
+    (asserts! (not (get is-finished narrative)) (err error-voting-ended))
+    (map-set segments { narrative-id: narrative-id, segment-id: new-segment-id } { text: text, creator: tx-sender })
+    (map-set narratives { narrative-id: narrative-id }
+      (merge narrative { latest-segment: new-segment-id }))
+    (map-set narrative-participants { narrative-id: narrative-id, creator: tx-sender } true)
+    (ok new-segment-id)
+  )
+)
+
+(define-public (create-branch (narrative-id uint) (path-a (string-ascii 100)) (path-b (string-ascii 100)))
+  (let
+    (
+      (narrative (unwrap! (map-get? narratives { narrative-id: narrative-id }) (err error-not-found)))
+      (new-branch-id (+ (var-get next-branch-id) u1))
+    )
+    (asserts! (not (get is-finished narrative)) (err error-voting-ended))
+    (map-set narrative-branches { narrative-id: narrative-id, branch-id: new-branch-id }
+      { paths: (list path-a path-b), tallies: (list u0 u0), is-active: true })
+    (var-set next-branch-id new-branch-id)
+    (ok new-branch-id)
+  )
+)
+
+(define-public (vote-on-branch (narrative-id uint) (branch-id uint) (choice uint))
+  (let
+    (
+      (branch (unwrap! (map-get? narrative-branches { narrative-id: narrative-id, branch-id: branch-id }) (err error-not-found)))
+      (current-tallies (get tallies branch))
+    )
+    (asserts! (get is-active branch) (err error-voting-ended))
+    (asserts! (or (is-eq choice u0) (is-eq choice u1)) (err error-invalid-choice))
+    (ok (map-set narrative-branches { narrative-id: narrative-id, branch-id: branch-id }
+      (merge branch { tallies: (list
+        (if (is-eq choice u0) (+ (default-to u0 (element-at? current-tallies u0)) u1) (default-to u0 (element-at? current-tallies u0)))
+        (if (is-eq choice u1) (+ (default-to u0 (element-at? current-tallies u1)) u1) (default-to u0 (element-at? current-tallies u1)))
+      )})))
+  )
+)
+
+(define-public (close-branch-voting (narrative-id uint) (branch-id uint))
+  (let
+    (
+      (branch (unwrap! (map-get? narrative-branches { narrative-id: narrative-id, branch-id: branch-id }) (err error-not-found)))
+    )
+    (asserts! (is-admin) (err error-admin-only))
+    (ok (map-set narrative-branches { narrative-id: narrative-id, branch-id: branch-id }
+      (merge branch { is-active: false })))
+  )
+)
+
+(define-public (finish-narrative (narrative-id uint))
+  (let
+    (
+      (narrative (unwrap! (map-get? narratives { narrative-id: narrative-id }) (err error-not-found)))
+    )
+    (asserts! (is-admin) (err error-admin-only))
+    (ok (map-set narratives { narrative-id: narrative-id }
+      (merge narrative { is-finished: true })))
+  )
+)
 
 ;; Read-only Functions
 (define-read-only (get-narrative (narrative-id uint))
